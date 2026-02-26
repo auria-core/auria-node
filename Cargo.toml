@@ -1,0 +1,36 @@
+[package]
+name = "auria-node"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/auria-core/auria-runtime"
+authors = ["AURIA Team <auria@dust.llc>"]
+description = "AURIA Runtime Core - Full node binary"
+
+[[bin]]
+name = "auria"
+path = "src/main.rs"
+
+[dependencies]
+auria-core = { path = "../auria-core", version = "0.1.0"}
+auria-config = { path = "../auria-config", version = "0.1.0"}
+auria-execution = { path = "../auria-execution", version = "0.1.0"}
+auria-router = { path = "../auria-router", version = "0.1.0"}
+auria-storage = { path = "../auria-storage", version = "0.1.0"}
+auria-license = { path = "../auria-license", version = "0.1.0"}
+auria-security = { path = "../auria-security", version = "0.1.0"}
+auria-network = { path = "../auria-network", version = "0.1.0"}
+auria-settlement = { path = "../auria-settlement", version = "0.1.0"}
+auria-observability = { path = "../auria-observability", version = "0.1.0"}
+auria-cluster = { path = "../auria-cluster", version = "0.1.0"}
+auria-plugin = { path = "../auria-plugin", version = "0.1.0"}
+auria-backend-cpu = { path = "../auria-backend-cpu", version = "0.1.0"}
+auria-backend-gpu = { path = "../auria-backend-gpu", version = "0.1.0"}
+
+anyhow = "1.0"
+tokio = { version = "1.35", features = ["rt-multi-thread", "macros", "time", "signal"] }
+clap = { version = "4.4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde_json = "1.0"
+time = { version = "0.3", features = ["serde"] }
