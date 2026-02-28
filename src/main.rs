@@ -1,3 +1,10 @@
+// File: main.rs - This file is part of AURIA
+// Copyright (c) 2026 AURIA Developers and Contributors
+// Description:
+//     Full node binary for AURIA Runtime Core.
+//     Entry point for running a complete Auria node that combines all
+//     subsystems including execution, routing, storage, licensing, and networking.
+//
 use clap::{Parser, Subcommand};
 use tracing::info;
 
