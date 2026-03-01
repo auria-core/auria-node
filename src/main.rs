@@ -12,10 +12,7 @@ use auria_core::{
     ExecutionState, RequestId, ShardId, Tier, UsageReceipt,
 };
 use auria_router::{DeterministicRouter, Router};
-use auria_execution::ExecutionEngine;
-use auria_storage::Storage;
-use auria_license::LicenseManager;
-use auria_settlement::SettlementClient;
+use auria_settlement::{SettlementClient, SettlementConfig};
 
 #[derive(Parser, Debug)]
 #[command(name = "auria", version, about = "Auria Node — Decentralized LLM Runtime")]
@@ -71,10 +68,9 @@ async fn status() -> anyhow::Result<()> {
 async fn start(preferred: Tier) -> anyhow::Result<()> {
     info!("Starting Auria Node with tier: {:?}", preferred);
 
-    let router = DeterministicRouter;
-    let storage = Storage::new(1000);
-    let license_manager = LicenseManager::new();
-    let settlement_client = SettlementClient::new();
+    let router = DeterministicRouter::new(1024);
+    let settlement_config = SettlementConfig::default();
+    let settlement_client = SettlementClient::new(settlement_config);
 
     info!(
         "Auria Node started successfully (tier={:?})",
