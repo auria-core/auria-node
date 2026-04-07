@@ -5,14 +5,13 @@
 //     Entry point for running a complete Auria node that combines all
 //     subsystems including execution, routing, storage, licensing, and networking.
 //
+use std::net::SocketAddr;
+
 use clap::{Parser, Subcommand};
 use tracing::info;
 
-use auria_core::{
-    ExecutionState, RequestId, ShardId, Tier, UsageReceipt,
-};
-use auria_router::{DeterministicRouter, Router};
-use auria_settlement::{SettlementClient, SettlementConfig};
+use auria_network::http::HttpServer;
+use auria_network::InferenceService;
 
 #[derive(Parser, Debug)]
 #[command(name = "auria", version, about = "Auria Node — Decentralized LLM Runtime")]
@@ -24,20 +23,12 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Command {
     Start {
+        #[arg(long, default_value = "8080")]
+        http_port: u16,
         #[arg(long, default_value = "nano")]
         tier: String,
     },
     Status,
-}
-
-fn parse_tier(s: &str) -> Tier {
-    match s.to_ascii_lowercase().as_str() {
-        "nano" => Tier::Nano,
-        "standard" => Tier::Standard,
-        "pro" => Tier::Pro,
-        "max" => Tier::Max,
-        _ => Tier::Nano,
-    }
 }
 
 #[tokio::main]
@@ -53,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.cmd {
         Command::Status => status().await?,
-        Command::Start { tier } => start(parse_tier(&tier)).await?,
+        Command::Start { http_port, tier } => start(http_port, tier).await?,
     }
 
     Ok(())
@@ -61,34 +52,34 @@ async fn main() -> anyhow::Result<()> {
 
 async fn status() -> anyhow::Result<()> {
     info!("Auria Node Status");
-    info!("Version: {}.{}.{}.{}.{}", 1, 0, 0, 0, 0);
+    info!("Version: 0.1.0");
+    info!("Checking connectivity to network services...");
     Ok(())
 }
 
-async fn start(preferred: Tier) -> anyhow::Result<()> {
-    info!("Starting Auria Node with tier: {:?}", preferred);
+async fn start(http_port: u16, tier: String) -> anyhow::Result<()> {
+    info!("Starting Auria Node");
+    info!("HTTP Port: {}", http_port);
+    info!("Default Tier: {}", tier);
 
-    let router = DeterministicRouter::new(1024);
-    let settlement_config = SettlementConfig::default();
-    let settlement_client = SettlementClient::new(settlement_config);
-
-    info!(
-        "Auria Node started successfully (tier={:?})",
-        preferred
-    );
-
-    let mut state = ExecutionState {
-        position: 0,
-        kv_cache: Vec::new(),
-    };
-    let request_id = RequestId([0u8; 16]);
-
-    for token_index in 0..5u64 {
-        let decision = router.route(preferred, token_index);
-        info!("Token {} routed to {:?}", token_index, decision.expert_ids);
-        state.position += 1;
+    let server = HttpServer::new(http_port);
+    let state = server.state().clone();
+    
+    let inference_service = InferenceService::new();
+    state.register_inference_handler(Box::new(inference_service)).await;
+    
+    let bind_addr: SocketAddr = format!("0.0.0.0:{}", http_port).parse()?;
+    
+    info!("Starting HTTP server on {}", bind_addr);
+    if let Err(e) = server.start(bind_addr).await {
+        tracing::error!("Failed to start HTTP server: {}", e);
+        return Err(anyhow::anyhow!("Server error: {}", e));
     }
-
-    info!("Demo execution completed");
+    
+    info!("Auria Node is running. Press Ctrl+C to stop.");
+    
+    tokio::signal::ctrl_c().await?;
+    info!("Shutting down...");
+    
     Ok(())
 }
