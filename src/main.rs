@@ -12,6 +12,9 @@ use tracing::info;
 
 use auria_network::http::HttpServer;
 use auria_network::InferenceService;
+use auria_network::P2PNode;
+use auria_settlement::{OnChainSettlement, OnChainSettlementConfig};
+use auria_cluster::{ClusterCoordinator, ClusterConfig};
 
 #[derive(Parser, Debug)]
 #[command(name = "auria", version, about = "Auria Node — Decentralized LLM Runtime")]
@@ -27,6 +30,24 @@ enum Command {
         http_port: u16,
         #[arg(long, default_value = "nano")]
         tier: String,
+        #[arg(long)]
+        p2p_port: Option<u16>,
+        #[arg(long, value_delimiter = ',')]
+        bootstrap_nodes: Vec<String>,
+        #[arg(long)]
+        settlement_rpc_url: Option<String>,
+        #[arg(long)]
+        settlement_contract: Option<String>,
+        #[arg(long)]
+        settlement_mnemonic: Option<String>,
+        #[arg(long, default_value = "1")]
+        chain_id: u64,
+        #[arg(long)]
+        cluster_id: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        cluster_peers: Vec<String>,
+        #[arg(long)]
+        model_path: Option<String>,
     },
     Status,
 }
@@ -44,7 +65,31 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.cmd {
         Command::Status => status().await?,
-        Command::Start { http_port, tier } => start(http_port, tier).await?,
+        Command::Start { 
+            http_port, 
+            tier, 
+            p2p_port, 
+            bootstrap_nodes,
+            settlement_rpc_url,
+            settlement_contract,
+            settlement_mnemonic,
+            chain_id,
+            cluster_id,
+            cluster_peers,
+            model_path,
+        } => start(
+            http_port, 
+            tier, 
+            p2p_port, 
+            bootstrap_nodes,
+            settlement_rpc_url,
+            settlement_contract,
+            settlement_mnemonic,
+            chain_id,
+            cluster_id,
+            cluster_peers,
+            model_path,
+        ).await?,
     }
 
     Ok(())
@@ -57,16 +102,134 @@ async fn status() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn start(http_port: u16, tier: String) -> anyhow::Result<()> {
+async fn start(
+    http_port: u16, 
+    tier: String, 
+    p2p_port: Option<u16>, 
+    bootstrap_nodes: Vec<String>,
+    settlement_rpc_url: Option<String>,
+    settlement_contract: Option<String>,
+    settlement_mnemonic: Option<String>,
+    chain_id: u64,
+    cluster_id: Option<String>,
+    cluster_peers: Vec<String>,
+    model_path: Option<String>,
+) -> anyhow::Result<()> {
     info!("Starting Auria Node");
     info!("HTTP Port: {}", http_port);
     info!("Default Tier: {}", tier);
 
+    let node_id = uuid::Uuid::new_v4().to_string();
+    let p2p_address = format!("0.0.0.0:{}", p2p_port.unwrap_or(9000));
+    
+    info!("P2P Node ID: {}", node_id);
+    info!("P2P Address: {}", p2p_address);
+    if !bootstrap_nodes.is_empty() {
+        info!("Bootstrap nodes: {:?}", bootstrap_nodes);
+    }
+
     let server = HttpServer::new(http_port);
     let state = server.state().clone();
     
-    let inference_service = InferenceService::new();
+    let inference_service = if let Some(ref model) = model_path {
+        info!("Initializing inference service with model: {}", model);
+        let service = InferenceService::new();
+        match service.load_model(model).await {
+            Ok(()) => {
+                info!("Model loaded successfully");
+                service
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load model: {}, using simulated inference", e);
+                InferenceService::new()
+            }
+        }
+    } else {
+        info!("No model specified, using simulated inference");
+        InferenceService::new()
+    };
     state.register_inference_handler(Box::new(inference_service)).await;
+    
+    let p2p_node = P2PNode::new(node_id.clone(), p2p_address);
+    for bootstrap in &bootstrap_nodes {
+        let addr = if bootstrap.contains(':') {
+            bootstrap.clone()
+        } else {
+            format!("{}:9000", bootstrap)
+        };
+        if let Err(e) = p2p_node.connect_p2p(addr.clone()).await {
+            tracing::warn!("Failed to connect to bootstrap node {}: {}", addr, e);
+        } else {
+            info!("Connected to bootstrap node: {}", addr);
+        }
+    }
+    state.set_p2p_node(p2p_node).await;
+
+    if let Some(rpc_url) = settlement_rpc_url {
+        let contract_address = settlement_contract.unwrap_or_else(|| "0x0000000000000000000000000000000000000000".to_string());
+        
+        info!("Initializing on-chain settlement");
+        info!("  RPC URL: {}", rpc_url);
+        info!("  Contract: {}", contract_address);
+        info!("  Chain ID: {}", chain_id);
+        
+        let config = OnChainSettlementConfig {
+            rpc_url,
+            settlement_contract_address: contract_address,
+            wallet_mnemonic: settlement_mnemonic,
+            chain_id,
+            settlement_interval_seconds: 3600,
+            min_receipts_for_settlement: 10,
+            auto_settle: false,
+            settle_on_threshold: true,
+            threshold_receipts: 100,
+        };
+        
+        match OnChainSettlement::new(config).await {
+            Ok(settlement) => {
+                if settlement.connect().await.await {
+                    info!("Connected to Ethereum blockchain");
+                } else {
+                    info!("Warning: Could not connect to Ethereum (settlement will be disabled)");
+                }
+                state.set_settlement(settlement).await;
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize settlement: {}", e);
+            }
+        }
+    } else {
+        info!("Settlement disabled (no RPC URL provided)");
+    }
+
+    if let Some(c_id) = cluster_id {
+        info!("Initializing cluster coordinator");
+        info!("  Cluster ID: {}", c_id);
+        
+        let cluster_config = ClusterConfig {
+            cluster_id: c_id.clone(),
+            heartbeat_interval_ms: 1000,
+            election_timeout_ms: 5000,
+            max_workers: 100,
+            task_timeout_seconds: 300,
+            failure_detection_threshold: 3,
+        };
+        
+        let mut cluster = ClusterCoordinator::with_config(cluster_config);
+        
+        if !cluster_peers.is_empty() {
+            info!("  Initializing Raft with peers: {:?}", cluster_peers);
+            if let Err(e) = cluster.init_raft(cluster_peers.clone()).await {
+                tracing::warn!("Failed to initialize Raft: {}", e);
+            }
+        } else {
+            info!("  Raft disabled (no cluster peers provided)");
+        }
+        
+        state.set_cluster(cluster).await;
+    } else {
+        info!("Cluster disabled (no cluster ID provided)");
+    }
     
     let bind_addr: SocketAddr = format!("0.0.0.0:{}", http_port).parse()?;
     
