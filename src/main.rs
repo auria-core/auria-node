@@ -12,9 +12,9 @@ use tracing::info;
 
 use auria_network::http::HttpServer;
 use auria_network::InferenceService;
-use auria_network::P2PNode;
+use auria_network::{P2PNode, p2p::{P2PNetwork, P2PConfig}};
 use auria_settlement::{OnChainSettlement, OnChainSettlementConfig};
-use auria_cluster::{ClusterCoordinator, ClusterConfig};
+use auria_network::http::{ClusterCoordinator, ClusterConfig};
 
 #[derive(Parser, Debug)]
 #[command(name = "auria", version, about = "Auria Node — Decentralized LLM Runtime")]
@@ -150,7 +150,28 @@ async fn start(
     };
     state.register_inference_handler(Box::new(inference_service)).await;
     
-    let p2p_node = P2PNode::new(node_id.clone(), p2p_address);
+    let p2p_config = P2PConfig {
+        listen_address: "0.0.0.0".to_string(),
+        listen_port: p2p_port.unwrap_or(9000),
+        bootstrap_nodes: bootstrap_nodes.clone(),
+        max_peers: 50,
+        enable_discovery: true,
+    };
+    
+    let p2p_network = P2PNetwork::new(p2p_config.clone());
+    
+    let p2p_node = P2PNode::with_network(
+        node_id.clone(),
+        p2p_address.clone(),
+        p2p_network.clone(),
+    );
+    
+    if let Err(e) = p2p_network.start_server().await {
+        tracing::warn!("Failed to start P2P server: {}", e);
+    } else {
+        info!("P2P server started on {}", p2p_address);
+    }
+    
     for bootstrap in &bootstrap_nodes {
         let addr = if bootstrap.contains(':') {
             bootstrap.clone()
@@ -187,10 +208,10 @@ async fn start(
         
         match OnChainSettlement::new(config).await {
             Ok(settlement) => {
-                if settlement.connect().await.await {
-                    info!("Connected to Ethereum blockchain");
-                } else {
-                    info!("Warning: Could not connect to Ethereum (settlement will be disabled)");
+                match settlement.connect().await {
+                    Ok(true) => info!("Connected to Ethereum blockchain"),
+                    Ok(false) => info!("Warning: Could not connect to Ethereum (settlement will be disabled)"),
+                    Err(e) => tracing::warn!("Failed to connect to Ethereum: {}", e),
                 }
                 state.set_settlement(settlement).await;
             }

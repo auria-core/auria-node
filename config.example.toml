@@ -1,0 +1,45 @@
+# AURIA Node Configuration
+
+[node]
+id = "auria-node-1"
+wallet_address = "0x0000000000000000000000000000000000000000"
+data_dir = "./data"
+log_level = "info"
+
+[storage]
+cache_dir = "./cache"
+max_cache_size_gb = 50
+network_storage_enabled = true
+
+[network]
+http_port = 8080
+grpc_port = 50051
+p2p_enabled = true
+p2p_port = 9000
+bootstrap_nodes = []
+
+[execution]
+enabled_tiers = ["nano", "standard", "pro", "max"]
+gpu_enabled = true
+max_batch_size = 8
+
+[settlement]
+settlement_enabled = false
+settlement_interval_seconds = 3600
+rpc_url = "http://localhost:8545"
+contract_address = "0x0000000000000000000000000000000000000000"
+wallet_mnemonic = ""
+chain_id = 1
+
+[cluster]
+cluster_enabled = false
+cluster_id = ""
+peers = []
+heartbeat_interval_ms = 1000
+election_timeout_ms = 5000
+
+[model]
+model_path = ""
+auto_load = false
+max_tokens = 2048
+default_temperature = 0.7
